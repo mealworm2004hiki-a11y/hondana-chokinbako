@@ -1,0 +1,15 @@
+{
+  "name": "ほんだな貯金箱",
+  "short_name": "ほんだな貯金",
+  "description": "図書館で借りて読んだ本の定価が貯金になる、本棚×貯金箱アプリ",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#faf3e7",
+  "theme_color": "#faf3e7",
+  "lang": "ja",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./apple-touch-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
