@@ -22,7 +22,9 @@ export type IconName =
   | 'search'
   | 'plus'
   | 'grid'
-  | 'spine';
+  | 'spine'
+  | 'chevronLeft'
+  | 'chevronRight';
 
 const ICONS: Record<IconName, string> = {
   home: '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>',
@@ -48,6 +50,8 @@ const ICONS: Record<IconName, string> = {
   plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
   grid: '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
   spine: '<path d="M4 4v16"/><path d="M8.5 4v16"/><path d="M13 4v16"/><rect width="5" height="16" x="16" y="4" rx="1"/>',
+  chevronLeft: '<path d="m15 18-6-6 6-6"/>',
+  chevronRight: '<path d="m9 18 6-6-6-6"/>',
 };
 
 export default function Icon({

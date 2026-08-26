@@ -11,7 +11,7 @@ function dateKey(d: Date): string {
   return `${monthKey(d)}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-const SPINE_COLORS = ['#ad4c2e', '#2e4a44', '#d99a3a', '#9c6b3a', '#7d5a4a', '#b0432c', '#3a6350'];
+const DOW = ['日', '月', '火', '水', '木', '金', '土'];
 
 export default function Stats() {
   const { books } = useStore();
@@ -53,37 +53,54 @@ export default function Stats() {
   const monthsElapsed = new Date().getMonth() + 1;
   const avgPerMonth = (yearDone.length / monthsElapsed).toFixed(1);
 
-  // ---- 読書カレンダー（直近26週の草マップ） ----
-  const heatmap = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const b of done) counts.set(b.finishedAt, (counts.get(b.finishedAt) ?? 0) + 1);
-    const todayD = new Date();
-    // 直近の土曜日を右端の列末尾とする
-    const end = new Date(todayD);
-    end.setDate(end.getDate() + (6 - end.getDay()));
-    const weeks: { date: string; count: number; future: boolean }[][] = [];
-    for (let w = 25; w >= 0; w--) {
-      const col: { date: string; count: number; future: boolean }[] = [];
-      for (let dow = 0; dow < 7; dow++) {
-        const d = new Date(end);
-        d.setDate(end.getDate() - w * 7 - (6 - dow));
-        const key = dateKey(d);
-        col.push({ date: key, count: counts.get(key) ?? 0, future: d > todayD });
-      }
-      weeks.push(col);
+  // ---- 読書カレンダー（月表示・読了した本を表示） ----
+  const finishedByDate = useMemo(() => {
+    const m = new Map<string, Book[]>();
+    for (const b of done) {
+      const arr = m.get(b.finishedAt) ?? [];
+      arr.push(b);
+      m.set(b.finishedAt, arr);
     }
-    return weeks;
+    return m;
   }, [done]);
 
-  // ---- 積み上がる本の山 ----
-  const pile = useMemo(
-    () =>
-      [...done]
-        .sort((a, b) => a.finishedAt.localeCompare(b.finishedAt))
-        .slice(-20),
-    [done]
-  );
-  const pileH = Math.max(60, pile.length * 20 + 30);
+  const [calDate, setCalDate] = useState(() => {
+    const n = new Date();
+    return new Date(n.getFullYear(), n.getMonth(), 1);
+  });
+  const shiftMonth = (delta: number) =>
+    setCalDate((d) => new Date(d.getFullYear(), d.getMonth() + delta, 1));
+
+  const calendar = useMemo(() => {
+    const y = calDate.getFullYear();
+    const mo = calDate.getMonth();
+    const daysInMonth = new Date(y, mo + 1, 0).getDate();
+    const lead = new Date(y, mo, 1).getDay(); // 0=日
+    const todayKey = dateKey(new Date());
+    const cells: (
+      | { day: number; date: string; dow: number; books: Book[]; today: boolean }
+      | null
+    )[] = [];
+    for (let i = 0; i < lead; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = new Date(y, mo, d);
+      const key = dateKey(date);
+      cells.push({
+        day: d,
+        date: key,
+        dow: date.getDay(),
+        books: finishedByDate.get(key) ?? [],
+        today: key === todayKey,
+      });
+    }
+    while (cells.length % 7 !== 0) cells.push(null);
+    return cells;
+  }, [calDate, finishedByDate]);
+
+  const monthCount = calendar.reduce((s, c) => s + (c ? c.books.length : 0), 0);
+  const isCurrentMonth =
+    calDate.getFullYear() === new Date().getFullYear() &&
+    calDate.getMonth() === new Date().getMonth();
 
   return (
     <div className="page">
@@ -148,53 +165,60 @@ export default function Stats() {
       </section>
 
       <section className="card">
-        <h2>読書カレンダー</h2>
-        <div className="heatmap-scroll">
-          <div className="heatmap">
-            {heatmap.map((col, i) => (
-              <div key={i} className="heat-col">
-                {col.map((cell) => (
-                  <div
-                    key={cell.date}
-                    title={`${cell.date}: ${cell.count}冊`}
-                    className={
-                      'heat-cell' +
-                      (cell.future ? ' future' : ' lv' + Math.min(cell.count, 3))
-                    }
-                  />
-                ))}
-              </div>
-            ))}
+        <div className="cal-head">
+          <button className="cal-nav" onClick={() => shiftMonth(-1)} aria-label="前の月">
+            <Icon name="chevronLeft" size={18} />
+          </button>
+          <div className="cal-title">
+            <h2>{calDate.getFullYear()}年 {calDate.getMonth() + 1}月</h2>
+            <span className="cal-sub">読了 {monthCount}冊</span>
           </div>
+          <button
+            className="cal-nav"
+            onClick={() => shiftMonth(1)}
+            aria-label="次の月"
+            disabled={isCurrentMonth}
+          >
+            <Icon name="chevronRight" size={18} />
+          </button>
         </div>
-        <div className="heat-legend">
-          少 <span className="heat-cell lv0" /><span className="heat-cell lv1" /><span className="heat-cell lv2" /><span className="heat-cell lv3" /> 多
-        </div>
-      </section>
 
-      <section className="card">
-        <h2>積み上がった本の山（直近{pile.length}冊）</h2>
-        {pile.length === 0 ? (
-          <p className="empty-hint">読了した本がここに積み上がっていきます</p>
-        ) : (
-          <svg viewBox={`0 0 320 ${pileH}`} className="pile-chart">
-            <line x1={20} y1={pileH - 12} x2={300} y2={pileH - 12} stroke="#d8c3a0" strokeWidth={3} strokeLinecap="round" />
-            {pile.map((b, i) => {
-              const hash = [...b.title].reduce((a, c) => a + c.charCodeAt(0), 0);
-              const w = 130 + (hash % 90);
-              const x = 160 - w / 2 + ((hash % 21) - 10);
-              const y = pileH - 12 - (i + 1) * 20 + 1;
-              return (
-                <g key={b.id}>
-                  <rect x={x} y={y} width={w} height={17} rx={4}
-                    fill={SPINE_COLORS[i % SPINE_COLORS.length]} />
-                  <text x={160} y={y + 12} textAnchor="middle" fontSize={9.5} fill="#fff">
-                    {b.title.length > 16 ? b.title.slice(0, 15) + '…' : b.title}
-                  </text>
-                </g>
-              );
-            })}
-          </svg>
+        <div className="cal-grid">
+          {DOW.map((w, i) => (
+            <div key={w} className={'cal-dow' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '')}>{w}</div>
+          ))}
+          {calendar.map((c, i) =>
+            c === null ? (
+              <div key={i} className="cal-cell empty" />
+            ) : (
+              <div
+                key={i}
+                className={
+                  'cal-cell' +
+                  (c.books.length ? ' has' : '') +
+                  (c.today ? ' today' : '') +
+                  (c.dow === 0 ? ' sun' : c.dow === 6 ? ' sat' : '')
+                }
+                title={
+                  c.books.length
+                    ? `${c.date}：${c.books.map((b) => b.title).join('、')}`
+                    : c.date
+                }
+              >
+                <span className="cal-day">{c.day}</span>
+                {c.books.length > 0 && (
+                  <span className="cal-mark">
+                    <Icon name="book" size={11} />
+                    {c.books.length > 1 && <span className="cal-count">{c.books.length}</span>}
+                  </span>
+                )}
+              </div>
+            )
+          )}
+        </div>
+
+        {monthCount === 0 && (
+          <p className="empty-hint cal-empty">この月に読了した本はありません</p>
         )}
       </section>
     </div>

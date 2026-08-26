@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import {
   SOURCE_LABEL,
@@ -33,50 +33,6 @@ const SORT_OPTIONS: { id: SortKey; label: string }[] = [
   { id: 'price-desc', label: '定価が高い順' },
   { id: 'due-asc', label: '返却期限が近い順' },
 ];
-
-type View = 'cover' | 'spine';
-
-/** 背表紙の色パレット（純喫茶テーマに寄せた落ち着いた配色） */
-const SPINE_COLORS = [
-  '#8c3b21', '#3a6350', '#6b4a2f', '#4f6f8f', '#a2543f',
-  '#5a6e46', '#7d5a86', '#b0813a', '#2f5560', '#8a4a52',
-  '#556b7a', '#7a6450',
-];
-
-function hashStr(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-
-function spineColor(b: Book): string {
-  return SPINE_COLORS[hashStr(b.title + (b.author ?? '')) % SPINE_COLORS.length];
-}
-
-/** ページ数に応じた背表紙の厚み（px）。不明なら中庸。 */
-function spineWidth(b: Book): number {
-  const p = b.pageCount ?? 240;
-  return Math.round(Math.max(34, Math.min(54, 26 + p / 14)));
-}
-
-/** 背表紙を棚の横幅に合わせて行ごとに詰める */
-function packRows(books: Book[], budget: number): Book[][] {
-  const rows: Book[][] = [];
-  let row: Book[] = [];
-  let used = 0;
-  for (const b of books) {
-    const w = spineWidth(b) + 4; // gap込み
-    if (used + w > budget && row.length > 0) {
-      rows.push(row);
-      row = [];
-      used = 0;
-    }
-    row.push(b);
-    used += w;
-  }
-  if (row.length > 0) rows.push(row);
-  return rows;
-}
 
 function sortBooks(books: Book[], key: SortKey): Book[] {
   const bs = [...books];
@@ -113,14 +69,6 @@ export default function Shelf() {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortKey>('rating-desc');
   const [openId, setOpenId] = useState<string | null>(null);
-  const [view, setView] = useState<View>(
-    () => (localStorage.getItem('shelfView') as View) || 'cover'
-  );
-
-  const changeView = (v: View) => {
-    setView(v);
-    localStorage.setItem('shelfView', v);
-  };
 
   const allTags = useMemo(
     () => Array.from(new Set(books.flatMap((b) => b.tags))).sort(),
@@ -142,24 +90,6 @@ export default function Shelf() {
     }
     return sortBooks(bs, sort);
   }, [books, status, source, tag, query, sort]);
-
-  const shelfRef = useRef<HTMLDivElement>(null);
-  const [shelfW, setShelfW] = useState(320);
-  useEffect(() => {
-    if (view !== 'spine') return;
-    const measure = () => {
-      const el = shelfRef.current;
-      if (el) setShelfW(el.clientWidth - 28); // 内側パディング分を差し引く
-    };
-    measure();
-    window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
-  }, [view]);
-
-  const spineRows = useMemo(
-    () => (view === 'spine' ? packRows(shown, shelfW) : []),
-    [view, shown, shelfW]
-  );
 
   const openBook = openId ? books.find((b) => b.id === openId) : undefined;
 
@@ -207,48 +137,10 @@ export default function Shelf() {
             ))}
           </select>
         </div>
-        <div className="view-toggle">
-          <button
-            className={'seg' + (view === 'cover' ? ' active' : '')}
-            onClick={() => changeView('cover')}
-          >
-            <Icon name="grid" size={15} /> 表紙
-          </button>
-          <button
-            className={'seg' + (view === 'spine' ? ' active' : '')}
-            onClick={() => changeView('spine')}
-          >
-            <Icon name="spine" size={15} /> 背表紙
-          </button>
-        </div>
       </div>
 
       {shown.length === 0 ? (
         <p className="empty-hint">該当する本がありません。「登録」タブから追加できます。</p>
-      ) : view === 'spine' ? (
-        <div className="bookshelf" ref={shelfRef}>
-          {spineRows.map((row, i) => (
-            <div className="shelf-row" key={i}>
-              <div className="shelf-books">
-                {row.map((b) => (
-                  <button
-                    key={b.id}
-                    className={'spine' + (b.status === 'reading' ? ' reading' : '')}
-                    style={{ width: spineWidth(b), background: spineColor(b) }}
-                    onClick={() => setOpenId(b.id)}
-                    title={b.title}
-                  >
-                    {b.rating != null && (
-                      <span className="spine-rating">★{b.rating.toFixed(1)}</span>
-                    )}
-                    <span className="spine-title">{b.title}</span>
-                  </button>
-                ))}
-              </div>
-              <div className="shelf-plank" />
-            </div>
-          ))}
-        </div>
       ) : (
         <div className="shelf-grid">
           {shown.map((b) => (
