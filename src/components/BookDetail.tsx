@@ -2,7 +2,6 @@ import { useStore } from '../store';
 import {
   SOURCE_LABEL,
   STATUS_LABEL,
-  today,
   yen,
   type Book,
   type Source,
@@ -140,10 +139,10 @@ export default function BookDetail({
 
         {book.status === 'done' && (
           <label className="field">
-            <span>読了日</span>
+            <span>読了日（任意）</span>
             <input
               type="date"
-              value={book.finishedAt ?? today()}
+              value={book.finishedAt ?? ''}
               onChange={(e) => set({ finishedAt: e.target.value || undefined })}
             />
           </label>
