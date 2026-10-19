@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useBookActions } from '../actions';
 import { useStore } from '../store';
 import {
   SOURCE_LABEL,
@@ -7,7 +8,6 @@ import {
   type Source,
   type Status,
 } from '../types';
-import BookDetail from './BookDetail';
 import BookCover from './BookCover';
 import Icon from './Icon';
 
@@ -61,19 +61,54 @@ function sortBooks(books: Book[], key: SortKey): Book[] {
   }
 }
 
+// 並び順・絞り込みはアプリを閉じても覚えておく（検索ワードは保存しない）
+const PREFS_KEY = 'hondana.shelfPrefs';
+interface ShelfPrefs {
+  status: Status | 'all';
+  source: Source | 'all';
+  tag: string;
+  sort: SortKey;
+}
+const DEFAULT_PREFS: ShelfPrefs = { status: 'all', source: 'all', tag: 'all', sort: 'rating-desc' };
+function loadPrefs(): ShelfPrefs {
+  try {
+    const v = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}');
+    return {
+      ...DEFAULT_PREFS,
+      ...v,
+      sort: SORT_OPTIONS.some((o) => o.id === v.sort) ? v.sort : DEFAULT_PREFS.sort,
+    };
+  } catch {
+    return DEFAULT_PREFS;
+  }
+}
+
 export default function Shelf() {
   const { books } = useStore();
-  const [status, setStatus] = useState<Status | 'all'>('all');
-  const [source, setSource] = useState<Source | 'all'>('all');
-  const [tag, setTag] = useState<string>('all');
+  const { openBook } = useBookActions();
+  const [prefs, setPrefs] = useState<ShelfPrefs>(loadPrefs);
+  const { status, source, sort } = prefs;
   const [query, setQuery] = useState('');
-  const [sort, setSort] = useState<SortKey>('rating-desc');
-  const [openId, setOpenId] = useState<string | null>(null);
+  const setStatus = (v: ShelfPrefs['status']) => setPrefs((p) => ({ ...p, status: v }));
+  const setSource = (v: ShelfPrefs['source']) => setPrefs((p) => ({ ...p, source: v }));
+  const setTag = (v: string) => setPrefs((p) => ({ ...p, tag: v }));
+  const setSort = (v: SortKey) => setPrefs((p) => ({ ...p, sort: v }));
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+    } catch {
+      /* 保存できなくても表示は続ける */
+    }
+  }, [prefs]);
 
   const allTags = useMemo(
     () => Array.from(new Set(books.flatMap((b) => b.tags))).sort(),
     [books]
   );
+  // 保存していたタグが消えていたら「全部」として扱う
+  const tag = prefs.tag === 'all' || allTags.includes(prefs.tag) ? prefs.tag : 'all';
+  const filtered = status !== 'all' || source !== 'all' || tag !== 'all' || query.trim() !== '';
 
   const shown = useMemo(() => {
     let bs = books;
@@ -81,17 +116,18 @@ export default function Shelf() {
     if (source !== 'all') bs = bs.filter((b) => b.source === source);
     if (tag !== 'all') bs = bs.filter((b) => b.tags.includes(tag));
     if (query.trim()) {
-      const q = query.trim().toLowerCase();
-      bs = bs.filter(
-        (b) =>
-          b.title.toLowerCase().includes(q) ||
-          (b.author ?? '').toLowerCase().includes(q)
-      );
+      const norm = (t: string) => t.normalize('NFKC').toLowerCase();
+      const words = norm(query).split(/\s+/).filter(Boolean);
+      // スペース区切りはAND検索。タイトル・著者・出版社・タグ・メモ・ISBNが対象
+      bs = bs.filter((b) => {
+        const hay = norm(
+          [b.title, b.author, b.publisher, b.memo, b.isbn, ...b.tags].filter(Boolean).join('\n')
+        );
+        return words.every((w) => hay.includes(w));
+      });
     }
     return sortBooks(bs, sort);
   }, [books, status, source, tag, query, sort]);
-
-  const openBook = openId ? books.find((b) => b.id === openId) : undefined;
 
   return (
     <div className="page">
@@ -103,7 +139,8 @@ export default function Shelf() {
         <input
           className="search-input"
           type="search"
-          placeholder="タイトル・著者で検索"
+          enterKeyHint="search"
+          placeholder="タイトル・著者・タグ・メモで検索"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -139,12 +176,27 @@ export default function Shelf() {
         </div>
       </div>
 
+      {filtered && (
+        <div className="filter-bar">
+          <span>絞り込み中：{shown.length} / {books.length}冊</span>
+          <button
+            className="link-btn"
+            onClick={() => {
+              setPrefs((p) => ({ ...p, status: 'all', source: 'all', tag: 'all' }));
+              setQuery('');
+            }}
+          >
+            解除
+          </button>
+        </div>
+      )}
+
       {shown.length === 0 ? (
         <p className="empty-hint">該当する本がありません。「登録」タブから追加できます。</p>
       ) : (
         <div className="shelf-grid">
           {shown.map((b) => (
-            <button key={b.id} className="shelf-item" onClick={() => setOpenId(b.id)}>
+            <button key={b.id} className="shelf-item" onClick={() => openBook(b.id)}>
               <div className="shelf-cover-wrap">
                 <BookCover coverUrl={b.coverUrl} isbn={b.isbn} title={b.title} className="shelf-cover" />
                 {b.rating != null && (
@@ -163,8 +215,6 @@ export default function Shelf() {
           ))}
         </div>
       )}
-
-      {openBook && <BookDetail book={openBook} onClose={() => setOpenId(null)} />}
     </div>
   );
 }

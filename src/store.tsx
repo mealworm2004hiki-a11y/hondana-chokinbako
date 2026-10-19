@@ -35,6 +35,10 @@ interface StoreValue {
   addBooks: (books: Book[]) => void;
   updateBook: (id: string, patch: Partial<Book>) => void;
   finishBook: (id: string, date?: string) => void;
+  /** 読了をやめる。keepRecord=true なら読み直し扱い（貯金・読了日は残す） */
+  leaveDone: (id: string, status: Book['status'], keepRecord: boolean) => void;
+  /** スナップショットで本を丸ごと戻す（取り消し用）。無ければ先頭に足す */
+  restoreBook: (book: Book) => void;
   deleteBook: (id: string) => void;
   addWithdrawal: (w: Withdrawal) => void;
   deleteWithdrawal: (id: string) => void;
@@ -91,16 +95,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const updateBook = useCallback((id: string, patch: Partial<Book>) => {
     setBooks((bs) =>
-      bs.map((b) => {
-        if (b.id !== id) return b;
-        const nb = { ...b, ...patch };
-        // 読了以外に戻したら貯金計上と読了日を取り消す
-        if (nb.status !== 'done') {
-          nb.savedYen = undefined;
-          nb.finishedAt = undefined;
-        }
-        return nb;
-      })
+      bs.map((b) => (b.id === id ? { ...b, ...patch } : b))
+    );
+  }, []);
+
+  const leaveDone = useCallback(
+    (id: string, status: Book['status'], keepRecord: boolean) => {
+      setBooks((bs) =>
+        bs.map((b) => {
+          if (b.id !== id) return b;
+          return keepRecord
+            ? { ...b, status }
+            : { ...b, status, savedYen: undefined, finishedAt: undefined };
+        })
+      );
+    },
+    []
+  );
+
+  const restoreBook = useCallback((book: Book) => {
+    setBooks((bs) =>
+      bs.some((b) => b.id === book.id)
+        ? bs.map((b) => (b.id === book.id ? book : b))
+        : [book, ...bs]
     );
   }, []);
 
@@ -108,7 +125,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     (id: string, date?: string) => {
       const target = books.find((b) => b.id === id);
       if (!target) return;
-      const finishedAt = date ?? target.finishedAt ?? today();
+      // 読み直しの再読了でも読了日は新しくする。貯金は1冊1回だけ（savedYenが残っていれば加算しない）
+      const finishedAt = date ?? today();
       const shouldSave =
         target.source === 'library' &&
         target.priceYen != null &&
@@ -173,6 +191,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addBooks,
     updateBook,
     finishBook,
+    leaveDone,
+    restoreBook,
     deleteBook,
     addWithdrawal,
     deleteWithdrawal,

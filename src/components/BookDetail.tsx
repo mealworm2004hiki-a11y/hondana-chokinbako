@@ -7,9 +7,11 @@ import {
   type Source,
   type Status,
 } from '../types';
+import { useState } from 'react';
 import RatingInput from './RatingInput';
 import BookCover from './BookCover';
 import Icon from './Icon';
+import { haptic, Sheet, useToast } from '../ui';
 
 export default function BookDetail({
   book,
@@ -18,32 +20,41 @@ export default function BookDetail({
   book: Book;
   onClose: () => void;
 }) {
-  const { updateBook, finishBook, deleteBook } = useStore();
+  const { updateBook, finishBook, deleteBook, leaveDone, restoreBook } = useStore();
+  const { toast } = useToast();
+  // 読了済みから別のステータスへ変えるときの行き先（確認シート表示中）
+  const [leavingTo, setLeavingTo] = useState<Status | null>(null);
 
   const set = (patch: Partial<Book>) => updateBook(book.id, patch);
 
   const onStatusChange = (s: Status) => {
+    if (s === book.status) return;
     if (s === 'done') {
+      haptic([12, 40, 18]);
       finishBook(book.id);
+    } else if (book.status === 'done') {
+      setLeavingTo(s);
     } else {
+      haptic(6);
       set({ status: s });
     }
   };
 
-  const onDelete = () => {
-    if (confirm(`「${book.title}」を削除しますか？`)) {
-      deleteBook(book.id);
-      onClose();
-    }
+  const onDelete = (close: () => void) => {
+    const snapshot = book;
+    haptic(14);
+    deleteBook(book.id);
+    close();
+    toast(`「${snapshot.title}」を削除しました`, {
+      label: '取り消す',
+      onClick: () => restoreBook(snapshot),
+    });
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <h2>本の詳細</h2>
-          <button className="icon-btn" onClick={onClose}><Icon name="close" size={18} /></button>
-        </div>
+    <Sheet onClose={onClose} title="本の詳細">
+      {(close) => (
+      <>
 
         <div className="detail-top">
           <BookCover coverUrl={book.coverUrl} isbn={book.isbn} title={book.title} className="detail-cover" placeholderChars={14} />
@@ -69,6 +80,7 @@ export default function BookDetail({
             <span>定価（税抜）</span>
             <input
               type="number"
+              inputMode="numeric"
               value={book.priceYen ?? ''}
               onChange={(e) =>
                 set({ priceYen: e.target.value === '' ? undefined : Number(e.target.value) })
@@ -79,6 +91,7 @@ export default function BookDetail({
             <span>ページ数</span>
             <input
               type="number"
+              inputMode="numeric"
               value={book.pageCount ?? ''}
               onChange={(e) =>
                 set({ pageCount: e.target.value === '' ? undefined : Number(e.target.value) })
@@ -177,10 +190,51 @@ export default function BookDetail({
         </label>
 
         <div className="modal-actions">
-          <button className="btn danger" onClick={onDelete}>削除</button>
-          <button className="btn primary" onClick={onClose}>閉じる</button>
+          <button className="btn danger" onClick={() => onDelete(close)}>削除</button>
+          <button className="btn primary" onClick={close}>閉じる</button>
         </div>
-      </div>
-    </div>
+
+        {leavingTo && (
+          <Sheet onClose={() => setLeavingTo(null)} title="読了をやめますか？" className="choice-sheet">
+            {(closeChoice) => (
+              <>
+                <p className="choice-lead">
+                  「{STATUS_LABEL[leavingTo]}」に変えます。
+                  {book.savedYen != null
+                    ? `この本の貯金（${yen(book.savedYen)}）と読了日はどうしますか？`
+                    : 'この本の読了日はどうしますか？'}
+                </p>
+                <div className="choice-list">
+                  <button
+                    className="btn primary wide"
+                    onClick={() => {
+                      haptic(8);
+                      leaveDone(book.id, leavingTo, true);
+                      closeChoice();
+                    }}
+                  >
+                    読み直し（{book.savedYen != null ? '貯金と' : ''}読了日は残す）
+                  </button>
+                  <button
+                    className="btn wide"
+                    onClick={() => {
+                      haptic(8);
+                      leaveDone(book.id, leavingTo, false);
+                      closeChoice();
+                    }}
+                  >
+                    間違いだった（{book.savedYen != null ? '貯金と' : ''}読了日を取り消す）
+                  </button>
+                  <button className="link-btn muted" onClick={closeChoice}>
+                    やめる
+                  </button>
+                </div>
+              </>
+            )}
+          </Sheet>
+        )}
+      </>
+      )}
+    </Sheet>
   );
 }

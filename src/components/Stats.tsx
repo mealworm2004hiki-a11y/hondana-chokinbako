@@ -18,7 +18,7 @@ export default function Stats() {
   const [metric, setMetric] = useState<'count' | 'yen'>('count');
 
   const done = useMemo(
-    () => books.filter((b): b is Book & { finishedAt: string } => b.status === 'done' && !!b.finishedAt),
+    () => books.filter((b): b is Book & { finishedAt: string } => !!b.finishedAt),
     [books]
   );
 

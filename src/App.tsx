@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { BookActionsProvider } from './actions';
+import { haptic, ToastProvider } from './ui';
 import { useStore } from './store';
 import Home from './components/Home';
 import Shelf from './components/Shelf';
@@ -20,7 +22,28 @@ const TABS: { id: Tab; icon: IconName; label: string }[] = [
 
 export default function App() {
   const { loaded, celebration } = useStore();
-  const [tab, setTab] = useState<Tab>('home');
+  const [tab, setTabState] = useState<Tab>('home');
+  // タブごとのスクロール位置を覚えておき、戻ってきたら復元する
+  const scrollPos = useRef<Partial<Record<Tab, number>>>({});
+
+  const setTab = (next: Tab) => {
+    if (next === tab) {
+      // 今のタブをもう一度押したら一番上へ
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    haptic(5);
+    scrollPos.current[tab] = window.scrollY;
+    setTabState(next);
+  };
+
+  useLayoutEffect(() => {
+    window.scrollTo(0, scrollPos.current[tab] ?? 0);
+  }, [tab]);
+
+  useEffect(() => {
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+  }, []);
 
   if (!loaded) {
     return (
@@ -31,11 +54,13 @@ export default function App() {
   }
 
   return (
+    <ToastProvider>
+    <BookActionsProvider>
     <div className="app">
-      <main className="screen">
-        {tab === 'home' && <Home onGoShelf={() => setTab('shelf')} onGoAdd={() => setTab('add')} />}
+      <main className="screen" key={tab}>
+        {tab === 'home' && <Home onGoAdd={() => setTab('add')} />}
         {tab === 'shelf' && <Shelf />}
-        {tab === 'add' && <AddBook onAdded={() => setTab('shelf')} />}
+        {tab === 'add' && <AddBook />}
         {tab === 'stats' && <Stats />}
         {tab === 'settings' && <SettingsView />}
       </main>
@@ -55,5 +80,7 @@ export default function App() {
       </nav>
       {celebration && <CoinRain key={celebration.key} amount={celebration.amount} />}
     </div>
+    </BookActionsProvider>
+    </ToastProvider>
   );
 }

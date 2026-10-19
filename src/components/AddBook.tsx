@@ -1,4 +1,6 @@
-import { lazy, Suspense, useCallback, useState } from 'react';
+import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
+import { useBookActions } from '../actions';
+import { haptic, useToast } from '../ui';
 import { lookupIsbn, searchBooks, type BookInfo } from '../api';
 import { useStore } from '../store';
 import {
@@ -30,7 +32,29 @@ interface Draft {
   tags: string;
 }
 
+// 前回選んだ入手方法・ステータスを覚えておく
+const DEFAULTS_KEY = 'hondana.addDefaults';
+function loadDefaults(): { source: Source; status: Status } {
+  try {
+    const v = JSON.parse(localStorage.getItem(DEFAULTS_KEY) ?? '{}');
+    if (v.source in SOURCE_LABEL && v.status in STATUS_LABEL && v.status !== 'done') return v;
+  } catch {
+    /* 読めなければ初期値 */
+  }
+  return { source: 'library', status: 'reading' };
+}
+function saveDefaults(source: Source, status: Status) {
+  try {
+    localStorage.setItem(DEFAULTS_KEY, JSON.stringify({ source, status }));
+  } catch {
+    /* 保存できなくても登録は続ける */
+  }
+}
+
+const normTitle = (t: string) => t.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+
 const emptyDraft = (): Draft => ({
+  ...loadDefaults(),
   isbn: '',
   title: '',
   author: '',
@@ -38,8 +62,6 @@ const emptyDraft = (): Draft => ({
   coverUrl: '',
   priceYen: '',
   pageCount: '',
-  status: 'reading',
-  source: 'library',
   borrowedAt: today(),
   dueDate: addDays(today(), 14),
   tags: '',
@@ -47,9 +69,13 @@ const emptyDraft = (): Draft => ({
 
 type Mode = 'keyword' | 'scan';
 
-export default function AddBook({ onAdded }: { onAdded: () => void }) {
-  const { addBook } = useStore();
+export default function AddBook() {
+  const { books, addBook, updateBook } = useStore();
+  const { openBook } = useBookActions();
+  const { toast } = useToast();
   const [mode, setMode] = useState<Mode>('keyword');
+  // バーコードで読み取った本を登録したら、次の本のためにカメラを開き直す
+  const [fromScan, setFromScan] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [looking, setLooking] = useState(false);
   const [draft, setDraft] = useState<Draft>(emptyDraft());
@@ -74,7 +100,9 @@ export default function AddBook({ onAdded }: { onAdded: () => void }) {
   }, []);
 
   const fillFromIsbn = useCallback(
-    async (isbn: string) => {
+    async (isbn: string, viaScan = false) => {
+      if (viaScan) haptic(15);
+      setFromScan(viaScan);
       setScanning(false);
       setLooking(true);
       setMessage(null);
@@ -90,6 +118,8 @@ export default function AddBook({ onAdded }: { onAdded: () => void }) {
     },
     [applyInfo]
   );
+
+  const onScanDetect = useCallback((isbn: string) => fillFromIsbn(isbn, true), [fillFromIsbn]);
 
   const runSearch = useCallback(async () => {
     const q = keyword.trim();
@@ -107,6 +137,7 @@ export default function AddBook({ onAdded }: { onAdded: () => void }) {
 
   const pickResult = useCallback(
     async (info: BookInfo) => {
+      setFromScan(false);
       // まず検索結果の情報で即座に埋める
       applyInfo(info, info.isbn ?? '');
       setResults(null);
@@ -123,9 +154,51 @@ export default function AddBook({ onAdded }: { onAdded: () => void }) {
     [applyInfo]
   );
 
+  // 本棚にすでにある本（ISBNかタイトルが一致）
+  const duplicate = useMemo(() => {
+    const isbn = draft.isbn.trim();
+    const t = normTitle(draft.title);
+    if (!isbn && !t) return undefined;
+    return books.find(
+      (b) => (isbn && b.isbn === isbn) || (t && normTitle(b.title) === t)
+    );
+  }, [books, draft.isbn, draft.title]);
+
+  const afterSave = (title: string, id: string, verb = '登録') => {
+    saveDefaults(draft.source, draft.status);
+    setDraft(emptyDraft());
+    setMessage(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    toast(`「${title}」を${verb}しました`, { label: '見る', onClick: () => openBook(id) });
+    if (fromScan) setScanning(true);
+  };
+
+  // 既存の記録を、今の入力（入手方法・ステータス・借りた日）で更新する
+  const updateExisting = () => {
+    if (!duplicate) return;
+    const lib = draft.source === 'library';
+    const price = Number(draft.priceYen);
+    const pages = Number(draft.pageCount);
+    haptic(12);
+    updateBook(duplicate.id, {
+      source: draft.source,
+      status: draft.status,
+      // 読了日・貯金は残す（読み直しでも貯金は1冊1回）
+      borrowedAt: lib ? draft.borrowedAt || undefined : duplicate.borrowedAt,
+      dueDate: lib ? draft.dueDate || undefined : duplicate.dueDate,
+      returned: lib ? false : duplicate.returned,
+      isbn: duplicate.isbn ?? (draft.isbn.trim() || undefined),
+      coverUrl: duplicate.coverUrl ?? (draft.coverUrl.trim() || undefined),
+      priceYen: duplicate.priceYen ?? (price > 0 ? price : undefined),
+      pageCount: duplicate.pageCount ?? (pages > 0 ? pages : undefined),
+    });
+    afterSave(duplicate.title, duplicate.id, '更新');
+  };
+
   const submit = () => {
     if (!draft.title.trim()) {
       setMessage('タイトルを入力してください');
+      haptic([20, 40, 20]);
       return;
     }
     const price = Number(draft.priceYen);
@@ -146,9 +219,9 @@ export default function AddBook({ onAdded }: { onAdded: () => void }) {
       borrowedAt: draft.source === 'library' ? draft.borrowedAt || undefined : undefined,
       dueDate: draft.source === 'library' ? draft.dueDate || undefined : undefined,
     };
+    haptic(12);
     addBook(book);
-    setDraft(emptyDraft());
-    onAdded();
+    afterSave(book.title, book.id);
   };
 
   return (
@@ -159,14 +232,23 @@ export default function AddBook({ onAdded }: { onAdded: () => void }) {
 
       {scanning ? (
         <Suspense fallback={<p className="notice">カメラを準備中…</p>}>
-          <Scanner onDetect={fillFromIsbn} onClose={() => setScanning(false)} />
+          <Scanner
+            onDetect={onScanDetect}
+            onClose={() => {
+              setScanning(false);
+              setFromScan(false);
+            }}
+          />
         </Suspense>
       ) : (
         <section className="card">
           <div className="seg-group">
             <button
               className={'seg' + (mode === 'keyword' ? ' active' : '')}
-              onClick={() => setMode('keyword')}
+              onClick={() => {
+                setMode('keyword');
+                setFromScan(false);
+              }}
             >
               <Icon name="search" size={16} /> タイトルで探す
             </button>
@@ -182,12 +264,16 @@ export default function AddBook({ onAdded }: { onAdded: () => void }) {
             <>
               <div className="isbn-row">
                 <input
-                  type="text"
+                  type="search"
+                  enterKeyHint="search"
                   placeholder="書名・著者などで検索"
                   value={keyword}
                   onChange={(e) => setKeyword(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') runSearch();
+                    if (e.key === 'Enter') {
+                      (e.target as HTMLInputElement).blur();
+                      runSearch();
+                    }
                   }}
                 />
                 <button
@@ -343,9 +429,31 @@ export default function AddBook({ onAdded }: { onAdded: () => void }) {
           />
         </label>
 
-        <button className="btn primary wide" onClick={submit}>
-          <Icon name="library" size={18} /> 本棚に登録する
-        </button>
+        {duplicate ? (
+          <div className="dup-box">
+            <p>
+              この本はもう本棚にあります（{SOURCE_LABEL[duplicate.source]}・
+              {STATUS_LABEL[duplicate.status]}）
+            </p>
+            <button className="btn primary wide" onClick={updateExisting}>
+              {draft.source === 'library'
+                ? 'この本を借りたことにする'
+                : `この本を「${STATUS_LABEL[draft.status]}」に更新する`}
+            </button>
+            <div className="dup-actions">
+              <button className="link-btn" onClick={() => openBook(duplicate.id)}>
+                本棚の記録を見る
+              </button>
+              <button className="link-btn muted" onClick={submit}>
+                別の本として登録
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button className="btn primary wide" onClick={submit}>
+            <Icon name="library" size={18} /> 本棚に登録する
+          </button>
+        )}
       </section>
     </div>
   );

@@ -2,6 +2,7 @@ import { useStore } from '../store';
 import { SOURCE_LABEL, STATUS_LABEL, today, yen, type Book } from '../types';
 import BookCover from './BookCover';
 import Icon from './Icon';
+import { useBookActions } from '../actions';
 
 function daysUntil(dateIso: string): number {
   const a = new Date(today() + 'T00:00:00').getTime();
@@ -9,14 +10,9 @@ function daysUntil(dateIso: string): number {
   return Math.round((b - a) / 86400000);
 }
 
-export default function Home({
-  onGoShelf,
-  onGoAdd,
-}: {
-  onGoShelf: () => void;
-  onGoAdd: () => void;
-}) {
-  const { books, savedTotal, settings, updateBook } = useStore();
+export default function Home({ onGoAdd }: { onGoAdd: () => void }) {
+  const { books, savedTotal, settings } = useStore();
+  const { openBook, quickFinish, returnBook, extendBook } = useBookActions();
 
   const goal = settings.goalYen ?? 0;
   const pct = goal > 0 ? Math.min(100, Math.max(0, (savedTotal / goal) * 100)) : 0;
@@ -66,14 +62,16 @@ export default function Home({
               const cls = d < 0 ? 'overdue' : d <= 3 ? 'soon' : 'ok';
               return (
                 <li key={b.id} className={'due-item ' + cls}>
-                  <span className="due-title">{b.title}</span>
+                  <button className="due-title" onClick={() => openBook(b.id)}>
+                    {b.title}
+                  </button>
                   <span className="due-days">
                     {d < 0 ? `${-d}日超過！` : d === 0 ? '今日まで！' : `あと${d}日`}
                   </span>
-                  <button
-                    className="btn small"
-                    onClick={() => updateBook(b.id, { returned: true })}
-                  >
+                  <button className="btn small ghost" onClick={() => extendBook(b.id)}>
+                    延長
+                  </button>
+                  <button className="btn small" onClick={() => returnBook(b.id)}>
                     返却した
                   </button>
                 </li>
@@ -104,13 +102,18 @@ export default function Home({
             </button>
           </p>
         ) : (
-          <div className="cover-strip" onClick={onGoShelf}>
+          <div className="cover-strip">
             {reading.map((b: Book) => (
-              <div key={b.id} className="strip-item">
-                <BookCover coverUrl={b.coverUrl} isbn={b.isbn} title={b.title} className="strip-cover" placeholderChars={12} />
-                <div className="strip-meta">
-                  {SOURCE_LABEL[b.source]}・{STATUS_LABEL[b.status]}
-                </div>
+              <div key={b.id} className="strip-slot">
+                <button className="strip-item" onClick={() => openBook(b.id)}>
+                  <BookCover coverUrl={b.coverUrl} isbn={b.isbn} title={b.title} className="strip-cover" placeholderChars={12} />
+                  <div className="strip-meta">
+                    {SOURCE_LABEL[b.source]}・{STATUS_LABEL[b.status]}
+                  </div>
+                </button>
+                <button className="strip-finish" onClick={() => quickFinish(b.id)}>
+                  <Icon name="bookCheck" size={13} /> 読了
+                </button>
               </div>
             ))}
           </div>
